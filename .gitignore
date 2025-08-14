@@ -18,3 +18,6 @@ venv/
 
 # Streamlit
 .streamlit/
+
+# Project local files (do not upload)
+eskikod2.txt
