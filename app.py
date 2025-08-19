@@ -10,6 +10,10 @@ from firebase_admin import credentials, firestore
 import re
 import hashlib
 
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+
 load_dotenv()
 
 # Firebase ve AI yapılandırması
@@ -118,56 +122,80 @@ def is_recipe_favorite(user_email, recipe_id):
         return False
 
 def generate_recipe_with_ai(ingredients):
-    """Gemini AI ile tarif üret"""
+    """Gemini (LangChain) ile tarif üret"""
     try:
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
-        #model = genai.GenerativeModel('gemini-1.5-flash')
-        #model = genai.GenerativeModel('gemini-2.5-flash')
-
+        # Gemini modelini başlat
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-1.5-flash",  # 2.5 yerine 1.5 daha hızlı
+            #model="gemini-2.5-flash", 
+            google_api_key=os.getenv("GEMINI_API_KEY"),
+            temperature=0.3 # Yaratıcılık seviyesi düşürüldü (daha tutarlı JSON için)
+            
+        )
         
-        prompt = f"""
-        Verilen malzemelerle yapılabilecek lezzetli tarifler öner. Malzemeler: {ingredients}
+        # Prompt şablonu oluştur
+        prompt = PromptTemplate(
+            input_variables=["ingredients"],
+            template="""
+            Verilen malzemelerle yapılabilecek lezzetli tarifler öner. Malzemeler: {ingredients}
+            
+            Lütfen yanıtını tam olarak şu JSON formatında ver:
+            ```json
+            {{
+                "recipes": [
+                    {{
+                        "id": "unique_recipe_id",
+                        "name": "Tarif Adı",
+                        "ingredients": ["malzeme1", "malzeme2", "malzeme3"],
+                        "steps": ["adım1", "adım2", "adım3"],
+                        "cook_time": "30 dakika",
+                        "calories": 250,
+                        "difficulty": "Kolay",
+                        "description": "Kısa açıklama"
+                    }}
+                ]
+            }}
+            ```
+            
+            Önemli:
+            - En az 3, en fazla 5 tarif öner
+            - Her tarifin benzersiz bir ID'si olsun
+            - Verilen malzemeleri mümkün olduğunca kullan
+            - Adımları net ve anlaşılır yaz
+            - Türkçe tarif isimleri kullan
+            - Sadece ve kesinlikle bu JSON formatında yanıt ver, başka hiçbir metin, açıklama veya not ekleme. JSON nesnelerinin ve dizilerinin son elemanından sonra VİRGÜL BIRAKMA.
+            """
+        )
         
-        Lütfen yanıtını tam olarak şu JSON formatında ver:
-        {{
-            "recipes": [
-                {{
-                    "id": "unique_recipe_id",
-                    "name": "Tarif Adı",
-                    "ingredients": ["malzeme1", "malzeme2", "malzeme3"],
-                    "steps": ["adım1", "adım2", "adım3"],
-                    "cook_time": "30 dakika",
-                    "calories": 250,
-                    "difficulty": "Kolay",
-                    "description": "Kısa açıklama"
-                }}
-            ]
-        }}
+        # Zincir oluştur
+        chain = LLMChain(llm=llm, prompt=prompt)
         
-        Önemli:
-        - En az 2, en fazla 4 tarif öner
-        - Her tarifin benzersiz bir ID'si olsun
-        - Verilen malzemeleri mümkün olduğunca kullan
-        - Adımları net ve anlaşılır yaz
-        - Türkçe tarif isimleri kullan
-        - Sadece JSON formatında yanıt ver, başka açıklama ekleme
-        """
+        # Tarifleri oluştur
+        response_text = chain.run(ingredients=ingredients)
         
-        response = model.generate_content(prompt)
-        
-        # JSON parse etme
-        response_text = response.text.strip()
-        
-        # Markdown code block'larını temizle
-        if response_text.startswith('```json'):
-            response_text = response_text[7:]
-        if response_text.endswith('```'):
-            response_text = response_text[:-3]
+        # --- JSON'ı temizleme ve parse etme ---
+        # Modelin bazen çıktıyı markdown bloğu içine alabileceğini varsayarak temizleme
         response_text = response_text.strip()
+        # Bazı durumlarda model çıktıya 'json' kelimesini de ekleyebilir, onu da temizleyelim
+        if response_text.startswith('```json'):
+            response_text = response_text[7:].strip() # Baştaki 'json' ve boşlukları temizle
+        if response_text.endswith('```'):
+            response_text = response_text[:-3].strip() # Sondaki '```' ve boşlukları temizle
+        
+        # JSON hatalarını gidermeye yönelik basit bir deneme: Sonundaki fazla virgülü temizle
+        response_text = re.sub(r',\s*\]', ']', response_text) # Array sonundaki fazla virgülü temizle
+        response_text = re.sub(r',\s*\}', '}', response_text) # Object sonundaki fazla virgülü temizle
+
+        # Debug için: AI'dan gelen ham yanıtı görmek isterseniz bu satırı açın
+        # st.write(f"AI Ham Yanıtı: {response_text}") 
         
         recipes_data = json.loads(response_text)
         return recipes_data.get('recipes', [])
         
+    except json.JSONDecodeError as e:
+        st.error(f"AI yanıtı JSON hatası: {e}. AI'dan gelen yanıt beklenenden farklı olabilir.")
+        st.error(f"Hatalı yanıtın başlangıcı: {response_text[:500]}...") # Hatalı yanıtın bir kısmını göster
+        return []
     except Exception as e:
         st.error(f"AI tarif üretme hatası: {str(e)}")
         return []
@@ -195,7 +223,17 @@ def display_recipes(recipe_list, user_email, user_ingredients, show_favorites_bu
             # Eksik malzemeleri kontrol et ve göster
             if user_ingredients:
                 recipe_ingredients = [ing.strip().lower() for ing in recipe['ingredients']]
-                missing_ingredients = [ing for ing in recipe_ingredients if ing not in user_ingredients]
+                user_ingredients_clean = [ing.strip().lower() for ing in user_ingredients]
+                missing_ingredients = []
+                for recipe_ing in recipe_ingredients:
+                    found = False
+                    for user_ing in user_ingredients_clean:
+                        if user_ing in recipe_ing or recipe_ing in user_ing:
+                            found = True
+                            break
+
+                    if not found:
+                        missing_ingredients.append(recipe_ing)
                 
                 if missing_ingredients:
                     st.warning(f"🛒 **Eksik Malzemeler:** {', '.join(missing_ingredients)}")
@@ -302,7 +340,7 @@ def show_dashboard(user_email):
         if st.session_state.current_recipes:
             st.success(f"✨ {len(st.session_state.current_recipes)} farklı tarif önerisi:")
             display_recipes(st.session_state.current_recipes, user_email, st.session_state.current_ingredients)
-        elif ingredients and st.button("Tarif Öner", key="suggest_button"):
+        elif st.session_state.current_recipes == [] and ingredients.strip() and "AI ile Tarif Öner" in st.session_state: # Bu koşulu düzenledik
             st.warning("😔 Üzgünüm, bu malzemelerle uygun tarif bulamadım. Başka malzemeler deneyin.")
 
     with tab2:
