@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
+<<<<<<< HEAD
   <component name="Black">
     <option name="sdkName" value="Python 3.13 (AI-First Capstone Projesi)" />
   </component>
+=======
+>>>>>>> b60973abdc67961f585000effb3e3d6602a76bab
   <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.13 (AI-First Capstone Projesi)" project-jdk-type="Python SDK" />
 </project>

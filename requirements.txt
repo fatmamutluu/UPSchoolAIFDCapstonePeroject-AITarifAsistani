@@ -3,6 +3,10 @@ firebase-admin
 requests
 python-dotenv
 google-cloud-firestore
+<<<<<<< HEAD
 google-generativeai
 langchain
 langchain-google-genai
+=======
+
+>>>>>>> b60973abdc67961f585000effb3e3d6602a76bab
