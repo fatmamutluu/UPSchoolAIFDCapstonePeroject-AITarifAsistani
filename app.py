@@ -31,8 +31,25 @@ genai.configure(api_key=GEMINI_API_KEY)
 def init_firebase():
     if not firebase_admin._apps:
         try:
-            cred = credentials.Certificate("serviceAccountKey.json")
-            firebase_admin.initialize_app(cred)
+            firebase_credentials = {"type": st.secrets["firebase"]["type"],
+"project_id": st.secrets["firebase"]["project_id"],
+  "private_key_id": st.secrets["firebase"]["private_key_id"],
+  # Üçlü tırnak kullandığımız için .replace('\\n', '\n') GEREKMEZ
+  "private_key": st.secrets["firebase"]["private_key"],
+  "client_email": st.secrets["firebase"]["client_email"],
+  "client_id": st.secrets["firebase"]["client_id"],
+  "auth_uri": st.secrets["firebase"]["auth_uri"],
+  "token_uri": st.secrets["firebase"]["token_uri"],
+  "auth_provider_x509_cert_url": st.secrets["firebase"]["auth_provider_x509_cert_url"],
+  "client_x509_cert_url": st.secrets["firebase"]["client_x509_cert_url"],
+  "universe_domain": st.secrets["firebase"]["universe_domain"]
+}
+            
+                                    
+            cred = credentials.Certificate(firebase_credentials)
+            if not firebase_admin._apps:
+                firebase_admin.initialize_app(cred)
+                
         except Exception as e:
             st.error(f"Firebase başlatma hatası: {str(e)}")
             return None
